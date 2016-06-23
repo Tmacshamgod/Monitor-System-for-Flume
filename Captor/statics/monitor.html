@@ -1,0 +1,251 @@
+<html>
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <title>Monitor System</title>
+
+        <script type="text/javascript" src="jquery-2.1.4.min.js"></script>
+        <style type="text/css">
+            label {
+                color: #FF0000;
+                font-weight: bold;
+                display: block;
+                float: right;
+            }
+        </style>
+        <script src="highstock.js"></script>
+        <script src="exporting.js"></script>
+        <script type="text/javascript">
+            var ipAddress = '10.103.0.1:11000';
+            var intervalTime = 10000;
+            var maxTime = '';
+            var items = [];
+            var flag = true;
+
+            $(function () {
+                window.Highcharts.setOptions({
+                    global : {
+                        useUTC : false
+                    }
+                });
+
+                function generate(chart) {
+                    $.ajax({
+                        url: 'http://10.103.0.5:11000/roles',
+                        success: function(data) {
+                            console.log(data);
+
+                            try {
+                                data = JSON.parse(data);
+                            } catch (e) {
+                                return setTimeout(function(){
+                                    generate(chart);
+                                }, intervalTime);                                         
+                            }
+
+                            data.map(function(item, index){
+                                var ip = item['ip'];
+                                var role = item['role'];
+                                items.push({
+                                    text: ip + "/" + role,
+                                    onclick: function(ip, role, chart) {
+                                        return function() {
+                                            if (ipAddress !== ip) {
+                                                ipAddress = ip;
+                                                maxTime = '';
+                                                clearAndRedraw(chart);
+                                                chart.setTitle(null, {
+                                                    text: 'Currently monitoring ' + ip + "/" + role
+                                                });
+                                            }
+                                        }
+                                    }(ip, role, chart)
+                                });
+                            });
+                        },
+                        error: function () {
+                            setTimeout(function() {
+                                generate(chart)
+                            }, intervalTime);
+                        },
+                        cache: false
+                    });
+                }
+
+                function fetch(chart) {
+                    console.log('maxTime', maxTime);
+                    $.ajax({
+                        url: 'http://10.103.0.5:11000/sampling?ip='+ ipAddress +'&topic=flume_agent_monitor&start=' + maxTime + '&count=100', 
+                        success: function(data) {
+                            console.log(data);
+                            
+                            try {
+                                data = JSON.parse(data);
+                            } catch (e) {
+                                return setTimeout(function(){
+                                    fetch(chart);
+                                }, intervalTime);                                         
+                            }
+
+                            data.map(function(item, index){
+                                if (index === data.length - 1) {
+                                    maxTime = item.timestamp;
+                                } 
+                                var time = item.timestamp;
+                                var points = item.points;
+                                var arr = [];
+
+                                points.map(function(row, index) {
+                                    arr.push([time, row]);
+                                });
+                                //console.log(arr);
+                                
+                                var a = arr.shift();
+                                var b = arr.shift();
+                                var c = arr.shift();
+                                //console.log(a);
+                                //console.log(b);
+                                //console.log(c);
+
+                                var shift = chart.series[0].data.length > 100;
+
+                                chart.series[0].addPoint(eval(a), false, shift);
+                                chart.series[1].addPoint(eval(b), false, shift);
+                                chart.series[2].addPoint(eval(c), false, shift);
+                                chart.redraw();
+                                
+                                if(a[1] === 0 && b[1] === 0 && c[1] === 0) {
+                                    if(flag) {
+                                        $('#time').text("The server didn't receive any data at: " + Highcharts.dateFormat('%Y/%m/%d, %H:%M:%S', time));
+                                    }
+                                    flag = false;
+                                } else {
+                                    $('#time').text("");
+                                    flag = true;
+                                }
+                            });
+
+                            setTimeout(function() {
+                                fetch(chart)
+                            }, intervalTime);
+                        },
+                        error: function () {
+                            setTimeout(function() {
+                                fetch(chart)
+                            }, intervalTime);
+                        },
+                        cache: false
+                    });
+                };
+
+                function clearAndRedraw(chart) {
+                    chart.series[0].setData([], false);
+                    chart.series[1].setData([], false);
+                    chart.series[2].setData([], false);
+                    chart.redraw();
+                }
+
+                // Create the chart
+                $('#container').highcharts('StockChart', {
+                    chart : {
+                        events : {
+                            load : function () {
+                                // set up the updating of the chart each second
+                                fetch(this);
+                                generate(this);
+                            }
+                        }
+                    },
+
+                    xAxis: [
+                        {
+                            events: {
+                                setExtremes: function(event) {
+                                    var three_minutes_ago = new Date().getTime() - 60000*3;
+                                    if(event.max < three_minutes_ago) {
+                                        $('#time').text("The server was crashed at : " + Highcharts.dateFormat('%Y/%m/%d, %H:%M:%S', event.max));
+                                    } else {
+                                        $('#time').text("");
+                                    }
+                                }
+                            }
+                        }
+                    ],
+
+                    lang: {
+                        clickme : 'Click Me Master!'
+                    },
+
+                    //不显示highCharts版权信息
+                    credits: {
+                        enabled: false
+                    },
+
+                    rangeSelector: {
+                        buttons: [{
+                            count: 1,
+                            type: 'minute',
+                            text: '1M'
+                        }, {
+                            count: 5,
+                            type: 'minute',
+                            text: '5M'
+                        }, {
+                            type: 'all',
+                            text: 'All'
+                        }],
+                        inputEnabled: false,
+                        selected: 0
+                    },
+
+                    title : {
+                        text : 'Live Data-Collecting Monitor System'
+                    },
+
+                    subtitle: {
+                        text: 'Currently monitoring 10.103.0.1:11000/Collector'
+                    },
+
+                    legend: {
+                        align: 'right',
+                        verticalAlign: 'top',
+                        layout: 'vertical',
+                        x: 0,
+                        y: 30
+                    },
+
+                    exporting: {
+                        buttons: {
+                            contextButton: {
+                                enabled: true
+                            },
+                            toggle: {
+                                text: 'Select Server',
+                                _titleKey: 'clickme',
+                                menuItems: items
+                            }
+                        }
+                    },
+
+                    series : [{
+                        type: 'spline',
+                        name : 'input data',
+                        data : []
+                    }, {
+                        type: 'spline',
+                        name : 'cache data',
+                        data : []
+                    }, {
+                        type: 'spline',
+                        name : 'output data',
+                        data : []
+                    }]
+                });
+            });
+        </script>
+    </head>
+
+    <body>
+        <label id="time" for="id_time"></label>
+        <div id="container" style="height: 800px; margin: 0 auto"></div>
+    </body>
+</html>

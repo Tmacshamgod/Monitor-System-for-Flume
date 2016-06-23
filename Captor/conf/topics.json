@@ -1,0 +1,8 @@
+[
+	{
+		"topic_name":"flume_agent_monitor",
+		"module_name":"flume_agent_monitor",
+		"time_interval":30,
+		"rows":1000
+	}
+]
